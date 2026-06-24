@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>からだで あそぼ！</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎈</text></svg>" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <video id="cam" playsinline muted></video>
+
+  <div id="start-screen">
+    <div class="card">
+      <h1>からだで あそぼ！</h1>
+      <p>ぷろじぇくたーの まえで からだを うごかして あそぶ げーむだよ</p>
+      <button id="start-btn">はじめる</button>
+      <p id="camera-error" hidden>
+        カメラが つかえませんでした。<br />
+        ブラウザの せっていで カメラを きょかして、もういちど「はじめる」を おしてね。
+      </p>
+      <p class="note">
+        おとなのひとへ：プロジェクターで かべに うつして、<br />
+        Webカメラは あそぶひとのほうに むけてください。
+      </p>
+    </div>
+  </div>
+
+  <button id="gear-btn" hidden title="せってい">⚙️</button>
+
+  <div id="settings" hidden>
+    <h2>せってい</h2>
+    <label>
+      うごきの かんど
+      <input id="sensitivity" type="range" min="0" max="100" value="50" />
+    </label>
+    <label>
+      カメラ
+      <select id="camera-select"></select>
+    </label>
+    <label class="row">
+      <input id="preview-toggle" type="checkbox" />
+      カメラの うつりを みる
+    </label>
+    <button id="fullscreen-btn">ぜんがめんに する（F）</button>
+    <button id="close-settings">とじる</button>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

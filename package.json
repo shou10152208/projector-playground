@@ -1,0 +1,10 @@
+{
+  "name": "karada-de-asobo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "プロジェクターとWebカメラで体を動かして遊ぶMRミニゲーム集",
+  "scripts": {
+    "start": "npx -y serve -l 8000 ."
+  }
+}
