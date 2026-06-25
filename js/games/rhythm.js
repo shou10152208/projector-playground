@@ -149,7 +149,8 @@ export const rhythmGame = {
       inp.id = 'rhythm-file-input';
       inp.type = 'file';
       inp.accept = 'audio/*';
-      inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none;';
+      // Start hidden; will be positioned over the canvas button in _drawIdle
+      inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none;z-index:10;left:0;top:0;width:0;height:0;';
       document.body.appendChild(inp);
     }
     this._fileInput = inp;
@@ -157,8 +158,24 @@ export const rhythmGame = {
       const file = e.target.files[0];
       if (!file) return;
       inp.value = '';
+      this._hideFileInput();
       await this._loadFile(file, app);
     };
+  },
+
+  // Overlay the file input directly over the canvas button (iOS Safari safe)
+  _positionFileInput(bx, by, bw, bh) {
+    if (!this._fileInput) return;
+    this._fileInput.style.cssText = `
+      position:fixed;left:${bx}px;top:${by}px;
+      width:${bw}px;height:${bh}px;
+      opacity:0;pointer-events:auto;z-index:10;cursor:pointer;
+    `;
+  },
+
+  _hideFileInput() {
+    if (!this._fileInput) return;
+    this._fileInput.style.cssText = 'position:fixed;opacity:0;pointer-events:none;left:0;top:0;width:0;height:0;z-index:10;';
   },
 
   async _loadFile(file, app) {
@@ -302,6 +319,9 @@ export const rhythmGame = {
     g.fillStyle = '#0d0d1a';
     g.fillRect(0, 0, W, H);
 
+    // Keep file input hidden unless _drawIdle positions it each frame
+    if (this.state !== 'idle') this._hideFileInput();
+
     if (this.state === 'idle') this._drawIdle(g, app);
     else if (this.state === 'loading') this._drawLoading(g, app);
     else if (this.state === 'difficulty') this._drawDifficulty(g, app);
@@ -354,6 +374,8 @@ export const rhythmGame = {
     g.fillText('📂 ファイルを えらぶ', W / 2, by + bh / 2);
 
     this._uploadBtnRect = { x: bx, y: by, w: bw, h: bh };
+    // Overlay transparent file input over the button (works on iOS Safari)
+    this._positionFileInput(bx, by, bw, bh);
 
     if (this.errorMsg) {
       g.font = `bold ${Math.max(15, sub * 0.85)}px ${FONT}`;
@@ -704,12 +726,7 @@ export const rhythmGame = {
   },
 
   handlePointer(px, py, app) {
-    if (this.state === 'idle') {
-      const b = this._uploadBtnRect;
-      if (b && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
-        this._fileInput.click();
-      }
-    } else if (this.state === 'difficulty') {
+    if (this.state === 'difficulty') {
       if (this._diffBtns) {
         for (const d of this._diffBtns) {
           if (px >= d.x && px <= d.x + d.w && py >= d.y && py <= d.y + d.h) {
