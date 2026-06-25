@@ -4,8 +4,10 @@ import { FONT } from './fx.js';
 import { bubblesGame } from './games/bubbles.js';
 import { starsGame } from './games/stars.js';
 import { flowersGame } from './games/flowers.js';
+import { musicGame } from './games/music.js';
+import { rhythmGame } from './games/rhythm.js';
 
-const GAMES = [bubblesGame, starsGame, flowersGame];
+const GAMES = [bubblesGame, starsGame, flowersGame, musicGame, rhythmGame];
 const HOLD_TIME = 1.3;
 const BACK_HOLD = 1.6;
 
@@ -74,15 +76,25 @@ resize();
 
 function menuButtons() {
   const { W, H } = app;
-  const r = Math.min(W * 0.13, H * 0.16);
-  const gap = Math.min(r * 2.8, W / 2 - r - 16);
-  return GAMES.map((game, i) => ({
-    id: game.id,
-    game,
-    r,
-    x: W / 2 + (i - 1) * gap,
-    y: H * 0.58 + Math.sin(app.t * 1.4 + i * 2.1) * H * 0.012,
-  }));
+  // 5 games: row0 = 3 items, row1 = 2 items
+  const r = Math.min(W * 0.1, H * 0.13);
+  const cols0 = 3;
+  const cols1 = 2;
+  const gap = Math.min(r * 2.6, (W - r * 2) / (cols0 - 1));
+  return GAMES.map((game, i) => {
+    const row = i < cols0 ? 0 : 1;
+    const col = i < cols0 ? i : i - cols0;
+    const totalInRow = row === 0 ? cols0 : cols1;
+    const rowX = W / 2 + (col - (totalInRow - 1) / 2) * gap;
+    const rowY = H * 0.44 + row * (r * 2.6);
+    return {
+      id: game.id,
+      game,
+      r,
+      x: rowX,
+      y: rowY + Math.sin(app.t * 1.4 + i * 2.1) * H * 0.01,
+    };
+  });
 }
 
 function backButton() {
@@ -247,7 +259,11 @@ canvas.addEventListener('pointerdown', (e) => {
     }
   } else {
     const btn = backButton();
-    if ((x - btn.x) ** 2 + (y - btn.y) ** 2 <= btn.r ** 2) backToMenu();
+    if ((x - btn.x) ** 2 + (y - btn.y) ** 2 <= btn.r ** 2) {
+      backToMenu();
+      return;
+    }
+    if (current && current.handlePointer) current.handlePointer(x, y, app);
   }
 });
 
