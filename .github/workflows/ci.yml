@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    name: 構文チェック (node --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: すべての JS モジュールを構文チェック
+        run: |
+          set -e
+          shopt -s nullglob
+          fail=0
+          for f in js/*.js js/games/*.js test/*.js; do
+            echo "checking $f"
+            node --check "$f" || fail=1
+          done
+          exit $fail
+
+  browser:
+    name: ヘッドレス実走テスト (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Playwright + Chromium を導入
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: セルフテスト + 各ゲーム起動テスト
+        run: python3 test/ci_test.py

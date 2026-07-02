@@ -1,5 +1,7 @@
 # からだで あそぼ！ 🎈
 
+[![CI](https://github.com/shou10152208/projector-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/shou10152208/projector-playground/actions/workflows/ci.yml)
+
 プロジェクターで壁に映して、Webカメラの前で体を動かして遊ぶMRミニゲーム集です。
 5歳の子どもと大人が一緒に楽しめるように、「負けない・全部たのしい」設計にしています。
 
