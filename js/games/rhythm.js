@@ -105,6 +105,8 @@ const WINDOWS = { perfect: 0.09, good: 0.16 };
 const LANE_COLORS = ['#ff5c8a', '#4db8ff', '#4ddb6e'];
 const LANE_LABELS = ['ひだり', 'まんなか', 'みぎ'];
 const FALL_SPEEDS = { easy: 280, normal: 400, hard: 560 };
+// 曲の再生をこの秒数だけ遅らせ、最初のノーツも画面上端から降ってこられるようにする
+const LEAD_IN = 1.6;
 
 // ---- Game ----
 
@@ -115,6 +117,7 @@ export const rhythmGame = {
   color: '#ff5c8a',
 
   init(app) {
+    this._stopAudio(); // 前回セッションの再生が残っていたら止める
     this.state = 'idle';
     this.parts = new Particles(800);
     this.texts = new FloatTexts();
@@ -137,9 +140,24 @@ export const rhythmGame = {
     this.countdown = 0;
     this.laneGlow = [0, 0, 0];
     this.laneHit = [0, 0, 0];
+    this.laneTriggered = [false, false, false];
     this.beatFlash = 0;
     this.errorMsg = '';
     this._setupFileInput(app);
+  },
+
+  // メニューへ戻るときに main.js から呼ばれる後片付け。
+  // 呼ばないと透明のファイル入力が画面に残ってメニュー操作を妨害し、曲も鳴り続ける。
+  dispose() {
+    this._stopAudio();
+    this._hideFileInput();
+  },
+
+  _stopAudio() {
+    if (this.audioSource) {
+      try { this.audioSource.stop(); } catch {}
+      this.audioSource = null;
+    }
   },
 
   _setupFileInput(app) {
@@ -209,19 +227,23 @@ export const rhythmGame = {
     this.misses = 0;
     this.laneGlow = [0, 0, 0];
     this.laneHit = [0, 0, 0];
+    this.laneTriggered = [false, false, false];
     this.countdown = 3;
     this.state = 'countdown';
     this._countdownT = 0;
   },
 
   _playAudio(app) {
-    if (this.audioSource) { try { this.audioSource.stop(); } catch {} }
+    this._stopAudio();
     const src = app.audio.ctx.createBufferSource();
     src.buffer = this.audioBuffer;
     src.connect(app.audio.master);
-    src.start(0);
+    // リードイン: 再生開始を遅らせて songTime を負から始め、
+    // 曲頭のノーツも画面上から降ってこられるようにする
+    const startAt = app.audio.ctx.currentTime + LEAD_IN;
+    src.start(startAt);
     this.audioSource = src;
-    this.startTime = app.audio.ctx.currentTime;
+    this.startTime = startAt;
   },
 
   update(dt, app) {
@@ -248,12 +270,16 @@ export const rhythmGame = {
     if (this.state === 'playing') {
       this.songTime = app.audio.ctx.currentTime - this.startTime;
 
-      // Beat flash
-      const beatLen = 60 / this.bpm;
-      const beatPhase = (this.songTime % beatLen) / beatLen;
-      if (beatPhase < 0.05) this.beatFlash = 0.4;
+      // Beat flash（リードイン中は鳴っていないので光らせない）
+      if (this.songTime >= 0) {
+        const beatLen = 60 / this.bpm;
+        const beatPhase = (this.songTime % beatLen) / beatLen;
+        if (beatPhase < 0.05) this.beatFlash = 0.4;
+      }
 
-      // Lane motion detection
+      // Lane motion detection（エッジトリガー: 動きが一度おさまってから
+      // 再び立ち上がった瞬間だけ判定する。押しっぱなしでノーツが
+      // GOOD窓の端で早取りされ続けるのを防ぐ）
       const { W, H } = app;
       const hitZoneY = H * 0.82;
       const laneXs = [W * 0.2, W * 0.5, W * 0.8];
@@ -261,7 +287,12 @@ export const rhythmGame = {
         const m = app.motionAt(laneXs[i] / W, hitZoneY / H, 0.13);
         if (m > 0.3) {
           this.laneGlow[i] = Math.min(1, this.laneGlow[i] + dt * 10);
-          this._tryJudge(i, app);
+          if (!this.laneTriggered[i]) {
+            this.laneTriggered[i] = true;
+            this._tryJudge(i, app);
+          }
+        } else if (m < 0.15) {
+          this.laneTriggered[i] = false;
         }
       }
 
@@ -271,13 +302,14 @@ export const rhythmGame = {
           n.missed = true;
           this.combo = 0;
           this.misses++;
+          this.texts.add(laneXs[n.lane], H * 0.7, 'MISS', 'rgba(255,255,255,0.55)', 28);
         }
       }
 
       // End when song finishes
       if (this.songTime >= this.duration + 2) {
         this.state = 'result';
-        if (this.audioSource) try { this.audioSource.stop(); } catch {}
+        this._stopAudio();
       }
     }
   },
@@ -615,6 +647,24 @@ export const rhythmGame = {
     this.parts.draw(g);
     this.texts.draw(g);
 
+    // リードイン中は「GO！」を出して始まりを知らせる
+    if (this.songTime < -0.15) {
+      const a = Math.min(1, (this.songTime + LEAD_IN) * 3);
+      g.save();
+      g.globalAlpha = Math.max(0, a);
+      const fs = Math.min(W, H) * 0.22;
+      g.font = `bold ${fs}px ${FONT}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineJoin = 'round';
+      g.lineWidth = fs * 0.14;
+      g.strokeStyle = '#fff';
+      g.strokeText('GO！', W / 2, H * 0.4);
+      g.fillStyle = '#4ddb6e';
+      g.fillText('GO！', W / 2, H * 0.4);
+      g.restore();
+    }
+
     // HUD
     this._drawHUD(g, app);
   },
@@ -645,7 +695,7 @@ export const rhythmGame = {
     }
 
     // Progress bar
-    const prog = Math.min(1, this.songTime / this.duration);
+    const prog = Math.min(1, Math.max(0, this.songTime / this.duration));
     const bh = 6;
     g.fillStyle = 'rgba(255,255,255,0.15)';
     g.fillRect(0, H - bh, W, bh);

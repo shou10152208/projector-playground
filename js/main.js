@@ -1,4 +1,5 @@
 import { MotionDetector } from './motion.js';
+import { PoseInput, LM } from './pose.js';
 import { audio } from './audio.js';
 import { FONT } from './fx.js';
 import { bubblesGame } from './games/bubbles.js';
@@ -6,8 +7,10 @@ import { starsGame } from './games/stars.js';
 import { flowersGame } from './games/flowers.js';
 import { musicGame } from './games/music.js';
 import { rhythmGame } from './games/rhythm.js';
+import { molesGame } from './games/moles.js';
+import { posesGame } from './games/poses.js';
 
-const GAMES = [bubblesGame, starsGame, flowersGame, musicGame, rhythmGame];
+const GAMES = [bubblesGame, starsGame, molesGame, flowersGame, musicGame, posesGame, rhythmGame];
 const HOLD_TIME = 1.3;
 const BACK_HOLD = 1.6;
 
@@ -49,8 +52,144 @@ const app = {
   H: 0,
   t: 0,
   audio,
-  motionAt: (nx, ny, r) => motion.motionAt(nx, ny, r),
+  motionAt: (nx, ny, r) => bodyGatedMotion(nx, ny, r),
+  hands: [],                    // 認識中の手カーソル [{x,y,body}]（スクリーンpx・鏡映済み）
+  bodies: [],                   // 名前付きランドマーク [{head,lWrist,rWrist,lShoulder,rShoulder,lHip,rHip,shoulderW}]
+  handsActive: () => handsActive(),
+  poseAvailable: () => !!pose && poseOn,
 };
+
+// ---- 人体認識（ポーズ） ----
+// カメラ映像から人のランドマークを取り、(1) 手の位置でメニューを選べるようにし、
+// (2) 「動き」を人体の近くだけに限定して、影や光などの誤反応を防ぐ。
+let pose = null;              // PoseInput（初期化成功時のみ）
+let poseOn = true;            // 設定のトグル
+let bodies = [];              // 今フレームの人体 [{points:[{nx,ny,v}], hands:[{x,y}]}]
+let lastBodyT = -10;          // 最後に人体が見えた時刻（app.t）
+let everSawBody = false;      // 一度でも人体を認識できたか（できない環境ではゲートしない）
+const handSmooth = new Map(); // "体idx:手idx" -> {x,y} 手カーソルの平滑化
+
+async function tryPose() {
+  if (fakeCam || pose) return; // テスト用合成映像ではポーズ認識を使わない
+  try {
+    const p = new PoseInput(video);
+    await p.init(2);
+    pose = p;
+  } catch (err) {
+    console.warn('[pose] 人体認識は無効（うごき検出のみで動作します）:', err);
+  }
+}
+
+function handsActive() {
+  return !!pose && poseOn && app.t - lastBodyT < 1.0;
+}
+
+function updateBodies(now) {
+  bodies = [];
+  app.hands = [];
+  app.bodies = [];
+  if (!pose || !poseOn) return;
+  const all = pose.detect(now);
+  if (all && all.length) {
+    for (let bi = 0; bi < all.length; bi++) {
+      const lm = all[bi];
+      if (!lm || lm.length < 25) continue;
+      // 鏡映（自分が見たままの左右）で正規化座標に
+      const points = lm.map((p) => ({ nx: 1 - p.x, ny: p.y, v: p.visibility ?? 1 }));
+      const hands = [];
+      [LM.L_WRIST, LM.R_WRIST].forEach((li, hi) => {
+        const pt = points[li];
+        const key = `${bi}:${hi}`;
+        if (pt.v < 0.4) {
+          handSmooth.delete(key);
+          return;
+        }
+        const tx = pt.nx * app.W;
+        const ty = pt.ny * app.H;
+        let s = handSmooth.get(key);
+        if (!s) {
+          s = { x: tx, y: ty };
+          handSmooth.set(key, s);
+        }
+        s.x += (tx - s.x) * 0.55;
+        s.y += (ty - s.y) * 0.55;
+        hands.push({ x: s.x, y: s.y });
+      });
+      bodies.push({ points, hands });
+      for (const h of hands) app.hands.push({ x: h.x, y: h.y, body: bi });
+
+      // ゲーム用の名前付きランドマーク（まねっこポーズ等が使う）
+      const named = (li) => {
+        const pt = points[li];
+        return { x: pt.nx * app.W, y: pt.ny * app.H, v: pt.v };
+      };
+      const lSh = named(LM.L_SHOULDER);
+      const rSh = named(LM.R_SHOULDER);
+      app.bodies.push({
+        head: named(LM.NOSE),
+        lWrist: named(LM.L_WRIST),
+        rWrist: named(LM.R_WRIST),
+        lShoulder: lSh,
+        rShoulder: rSh,
+        lHip: named(LM.L_HIP),
+        rHip: named(LM.R_HIP),
+        shoulderW: Math.max(30, Math.hypot(lSh.x - rSh.x, lSh.y - rSh.y)),
+      });
+    }
+  }
+  if (bodies.length) {
+    lastBodyT = app.t;
+    everSawBody = true;
+  }
+}
+
+// ポーズ認識が使えるときは、人体ランドマークの近くで起きた動きだけを有効にする。
+// 使えないとき（初期化失敗・トグルOFF・fakecam）は従来どおり生の動きを返す。
+function bodyGatedMotion(nx, ny, r) {
+  const m = motion.motionAt(nx, ny, r);
+  if (!pose || !poseOn || m <= 0) return m;
+  // この環境で一度も人体を認識できていないなら、ゲートせず従来動作を保つ
+  // （カメラの画角や照明で認識できない場合に遊べなくなるのを防ぐ）
+  if (!everSawBody) return m;
+  if (app.t - lastBodyT > 1.0) return 0; // 誰も見えていない間の動きはノイズ扱い
+  if (!bodies.length) return m;          // 一瞬の見失い（1秒未満）は素通し
+  const th = Math.max(r * app.W * 1.6, Math.min(app.W, app.H) * 0.16);
+  const th2 = th * th;
+  for (const b of bodies) {
+    for (const pt of b.points) {
+      if (pt.v < 0.3) continue;
+      const dx = (pt.nx - nx) * app.W;
+      const dy = (pt.ny - ny) * app.H;
+      if (dx * dx + dy * dy < th2) return m;
+    }
+  }
+  return 0;
+}
+
+const HAND_CURSOR_COLORS = ['255,111,165', '77,184,255', '255,210,63', '124,255,107'];
+
+function drawHandCursors() {
+  for (const hd of app.hands) {
+    const c = HAND_CURSOR_COLORS[hd.body % HAND_CURSOR_COLORS.length];
+    const r = Math.min(app.W, app.H) * 0.03;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const grad = g.createRadialGradient(hd.x, hd.y, 0, hd.x, hd.y, r * 2.2);
+    grad.addColorStop(0, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(0.35, `rgba(${c},0.55)`);
+    grad.addColorStop(1, `rgba(${c},0)`);
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(hd.x, hd.y, r * 2.2, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = `rgba(${c},0.9)`;
+    g.lineWidth = 2.5;
+    g.beginPath();
+    g.arc(hd.x, hd.y, r * 0.75, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
+  }
+}
 
 let state = 'menu';
 let current = null;
@@ -76,17 +215,17 @@ resize();
 
 function menuButtons() {
   const { W, H } = app;
-  // 5 games: row0 = 3 items, row1 = 2 items
-  const r = Math.min(W * 0.1, H * 0.13);
-  const cols0 = 3;
-  const cols1 = 2;
-  const gap = Math.min(r * 2.6, (W - r * 2) / (cols0 - 1));
+  // ゲーム数に応じて 2 行に割り付ける（例: 7個 → 4 + 3）
+  const n = GAMES.length;
+  const cols0 = Math.ceil(n / 2);
+  const r = Math.min((W * 0.82) / (cols0 * 2.6), H * 0.115);
+  const gap = Math.min(r * 2.7, (W - r * 2) / Math.max(1, cols0 - 1));
   return GAMES.map((game, i) => {
     const row = i < cols0 ? 0 : 1;
     const col = i < cols0 ? i : i - cols0;
-    const totalInRow = row === 0 ? cols0 : cols1;
+    const totalInRow = row === 0 ? cols0 : n - cols0;
     const rowX = W / 2 + (col - (totalInRow - 1) / 2) * gap;
-    const rowY = H * 0.44 + row * (r * 2.6);
+    const rowY = H * 0.44 + row * (r * 2.7);
     return {
       id: game.id,
       game,
@@ -103,10 +242,19 @@ function backButton() {
 }
 
 function updateHold(btn, dt, holdTime, onComplete) {
-  const m = app.motionAt(btn.x / app.W, btn.y / app.H, (btn.r / app.W) * 0.8);
+  // 人体認識中: 手カーソルをボタンにかざしている間たまる（誤反応しない）。
+  // それ以外: ボタン位置の「動き」でたまる（従来どおり）。
+  let engaged;
+  if (handsActive()) {
+    engaged = app.hands.some(
+      (hd) => (hd.x - btn.x) ** 2 + (hd.y - btn.y) ** 2 <= (btn.r * 1.15) ** 2
+    );
+  } else {
+    engaged = app.motionAt(btn.x / app.W, btn.y / app.H, (btn.r / app.W) * 0.8) > 0.35;
+  }
   let h = holds.get(btn.id) || 0;
   const before = h;
-  if (m > 0.35) h += dt;
+  if (engaged) h += dt;
   else h = Math.max(0, h - dt * 2);
   if (before < holdTime * 0.3 && h >= holdTime * 0.3) audio.tick();
   if (before < holdTime * 0.7 && h >= holdTime * 0.7) audio.tick();
@@ -163,7 +311,10 @@ function menuFrame(dt) {
   const subSize = Math.max(20, titleSize * 0.3);
   g.font = `bold ${subSize}px ${FONT}`;
   g.fillStyle = '#8a6d4f';
-  g.fillText('あそびたい えの まえで てを ふってね', W / 2, H * 0.31);
+  const subMsg = handsActive()
+    ? 'あそびたい えに てを かざしてね'
+    : 'あそびたい えの まえで てを ふってね';
+  g.fillText(subMsg, W / 2, H * 0.31);
 
   for (const btn of menuButtons()) {
     const progress = updateHold(btn, dt, HOLD_TIME, () => startGame(btn.game));
@@ -241,6 +392,8 @@ function startGame(game) {
 function backToMenu() {
   audio.select();
   holds.clear();
+  // ゲーム側の後片付け（リズムゲームのファイル入力・曲再生の停止など）
+  if (current && current.dispose) current.dispose(app);
   current = null;
   state = 'menu';
 }
@@ -329,6 +482,9 @@ document.getElementById('sensitivity').addEventListener('input', (e) => {
 document.getElementById('preview-toggle').addEventListener('change', (e) => {
   previewOn = e.target.checked;
 });
+document.getElementById('pose-toggle').addEventListener('change', (e) => {
+  poseOn = e.target.checked;
+});
 document.getElementById('fullscreen-btn').addEventListener('click', toggleFullscreen);
 
 function toggleFullscreen() {
@@ -385,8 +541,10 @@ function frame(now) {
   app.t += dt;
   if (fakeCam) drawFakeCam();
   motion.update(camSource);
+  updateBodies(now);
   if (state === 'menu') menuFrame(dt);
   else gameFrame(dt);
+  drawHandCursors();
   drawPreview();
   requestAnimationFrame(frame);
 }
@@ -428,6 +586,7 @@ startBtn.addEventListener('click', async () => {
   startScreen.hidden = true;
   gearBtn.hidden = false;
   populateCameraList();
+  tryPose(); // 裏で人体認識を起動（失敗してもうごき検出だけで遊べる）
   if (!running) {
     running = true;
     last = performance.now();
