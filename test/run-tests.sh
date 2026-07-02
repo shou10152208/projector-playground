@@ -57,13 +57,17 @@ run_chrome --window-size=1280,720 --virtual-time-budget=9000 \
 run_chrome --window-size=1280,720 --virtual-time-budget=12000 \
   --screenshot="$ROOT_WIN\\test\\shot-flowers.png" \
   "http://localhost:$PORT/index.html?autostart=1&fakecam=1#flowers" >/dev/null
+# もぐらたたき
+run_chrome --window-size=1280,720 --virtual-time-budget=9000 \
+  --screenshot="$ROOT_WIN\\test\\shot-moles.png" \
+  "http://localhost:$PORT/index.html?autostart=1&fakecam=1#moles" >/dev/null
 # スマホ縦画面の見え方(スタート画面)。
 # ヘッドレスは layout 幅を 478px 未満にしないため、撮影幅も 480 にして切れを防ぐ。
 run_chrome --window-size=480,860 --virtual-time-budget=3000 \
   --screenshot="$ROOT_WIN\\test\\shot-phone.png" \
   "http://localhost:$PORT/index.html" >/dev/null
 
-for f in shot-menu shot-game shot-stars shot-flowers shot-phone; do
+for f in shot-menu shot-game shot-stars shot-flowers shot-moles shot-phone; do
   if [ -s "test/$f.png" ]; then
     sz=$(stat -c%s "test/$f.png")
     echo "  ✓ test/$f.png ($sz bytes)"

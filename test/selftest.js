@@ -5,6 +5,8 @@ import { MotionDetector } from '../js/motion.js';
 import { bubblesGame } from '../js/games/bubbles.js';
 import { starsGame } from '../js/games/stars.js';
 import { flowersGame } from '../js/games/flowers.js';
+import { molesGame } from '../js/games/moles.js';
+import { posesGame } from '../js/games/poses.js';
 
 const results = [];
 function record(name, ok, detail = '') {
@@ -107,6 +109,61 @@ function runMotion() {
   }
 }
 
+// まねっこポーズ: 合成ボディで「おてほん→ポーズ判定→せいこう」の流れを踏む
+function runPoses() {
+  try {
+    const { app, g } = makeApp();
+    app.poseAvailable = () => true; // からだにんしき有効の体裁
+    app.hands = [];
+    const mkBody = (poseId) => {
+      const cx = app.W / 2;
+      const shY = app.H * 0.5;
+      const sw = 200; // 肩幅(px)
+      const head = { x: cx, y: shY - 150, v: 1 };
+      let lW;
+      let rW;
+      if (poseId === 'up') {
+        lW = { x: cx - 120, y: head.y - 120, v: 1 };
+        rW = { x: cx + 120, y: head.y - 120, v: 1 };
+      } else if (poseId === 'wide') {
+        lW = { x: cx - sw * 1.4, y: shY, v: 1 };
+        rW = { x: cx + sw * 1.4, y: shY, v: 1 };
+      } else if (poseId === 'oneUp') {
+        lW = { x: cx - 100, y: head.y - 120, v: 1 };
+        rW = { x: cx + 80, y: shY + 120, v: 1 };
+      } else {
+        lW = { x: cx - 30, y: head.y, v: 1 };
+        rW = { x: cx + 30, y: head.y, v: 1 };
+      }
+      return {
+        head,
+        lWrist: lW,
+        rWrist: rW,
+        lShoulder: { x: cx - sw / 2, y: shY, v: 1 },
+        rShoulder: { x: cx + sw / 2, y: shY, v: 1 },
+        lHip: { x: cx - 60, y: shY + 260, v: 1 },
+        rHip: { x: cx + 60, y: shY + 260, v: 1 },
+        shoulderW: sw,
+      };
+    };
+    posesGame.init(app);
+    let successes = 0;
+    const dt = 1 / 60;
+    for (let i = 0; i < 1500; i++) {
+      app.t += dt;
+      // play 中だけ、お手本どおりのポーズを取っている体を見せる
+      app.bodies = posesGame.state === 'play' ? [mkBody(posesGame.pose.id)] : [];
+      const before = posesGame.score;
+      posesGame.update(dt, app);
+      if (posesGame.score > before) successes++;
+      posesGame.draw(g, app);
+    }
+    record('game:まねっこ ポーズ判定→せいこう', successes >= 2, `successes=${successes} score=${posesGame.score}`);
+  } catch (e) {
+    record('game:まねっこ', false, e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));
+  }
+}
+
 // 実カメラ経路(--use-fake-device-for-media-stream がある時だけ)。
 async function runCamera() {
   try {
@@ -144,6 +201,9 @@ async function runCamera() {
   runGame(bubblesGame, 'しゃぼんだま');
   runGame(starsGame, 'ほしキャッチ');
   runGame(flowersGame, 'おはなばたけ');
+  runGame(molesGame, 'もぐらたたき');
+  runGame(posesGame, 'まねっこ(にんしき無し)');
+  runPoses();
   await runCamera();
 
   if (asyncErrors.length) {

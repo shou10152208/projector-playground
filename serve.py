@@ -72,9 +72,21 @@ def ensure_cert():
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # MediaPipe(vendor/) のモジュール/WASM/モデルを正しく配信するための MIME
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".wasm": "application/wasm",
+        ".task": "application/octet-stream",
+    }
+
     # ES モジュールのキャッシュで古い JS を掴まないようにする
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
+        # crossOriginIsolated にして WASM スレッド（人体認識の高速化）を有効にする
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         super().end_headers()
 
     def log_message(self, fmt, *args):
